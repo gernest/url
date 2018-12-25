@@ -247,7 +247,7 @@ pub const URL = struct {
     fragment: ?[]const u8,
     allocator: *mem.Allocator,
 
-    fn init(allocator: *mem.Allocator) URL {
+    pub fn init(allocator: *mem.Allocator) URL {
         return URL{
             .scheme = null,
             .opaque = null,
@@ -262,7 +262,7 @@ pub const URL = struct {
         };
     }
 
-    fn deinit(u: *URL) void {
+    pub fn deinit(u: *URL) void {
         if (u.scheme != null) {
             u.allocator.free(u.scheme.?);
         }
@@ -297,7 +297,7 @@ pub const URL = struct {
         }
     }
 
-    fn getScheme(u: *URI, raw: []const u8) !void {
+    pub fn getScheme(u: *URI, raw: []const u8) !void {
         var i: usize = 0;
         while (i < raw.len) {
             const c = raw[i];
@@ -337,7 +337,7 @@ pub const URL = struct {
         u.path = path;
     }
 
-    fn parse(u: URL, raw_url: []const u8, via_request: bool) !void {
+    pub fn parse(u: URL, raw_url: []const u8, via_request: bool) !void {
         if (raw_url == "" and via_request) {
             return error.EmptyURL;
         }
@@ -359,7 +359,7 @@ pub const UserInfo = struct {
     password: ?[]const u8,
     password_set: bool,
 
-    fn init(name: []const u8) UserInfo {
+    pub fn init(name: []const u8) UserInfo {
         return UserInfo{
             .username = name,
             .password = null,
@@ -367,7 +367,7 @@ pub const UserInfo = struct {
         };
     }
 
-    fn initWithPassword(name: []const u8, password: []const u8) UserInfo {
+    pub fn initWithPassword(name: []const u8, password: []const u8) UserInfo {
         return UserInfo{
             .username = name,
             .password = password,
@@ -375,7 +375,7 @@ pub const UserInfo = struct {
         };
     }
 
-    fn encode(u: *UserInfo, buf: *std.Buffer) !void {
+    pub fn encode(u: *UserInfo, buf: *std.Buffer) !void {
         if (u.username != null) {
             try escape(buf, u.username.?, encoding.userPassword);
         }
