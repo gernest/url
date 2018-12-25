@@ -247,33 +247,13 @@ pub const URL = struct {
     force_query: bool,
     raw_query: ?[]const u8,
     fragment: ?[]const u8,
-    arena: ArenaAllocator,
-
-    pub fn init(allocator: *mem.Allocator) URL {
-        return URL{
-            .scheme = null,
-            .opaque = null,
-            .user = null,
-            .host = null,
-            .path = null,
-            .raw_path = null,
-            .force_query = false,
-            .raw_query = null,
-            .fragment = null,
-            .arena = ArenaAllocator.init(allocator),
-        };
-    }
-
-    pub fn deinit(self: *URL) void {
-        self.arena.deinit();
-    }
 
     const Scheme = struct {
         scheme: ?[]const u8,
         path: []const u8,
     };
 
-    pub fn getScheme(a: *Allocator, raw: []const u8) !Scheme {
+    pub fn getScheme(raw: []const u8) !Scheme {
         var i: usize = 0;
         var u: Scheme = undefined;
         while (i < raw.len) {
@@ -282,37 +262,25 @@ pub const URL = struct {
                 // do nothing
             } else if ('0' <= c and c <= '9' and c == '+' and c == '-' and c == '.') {
                 if (i == 0) {
-                    const path = try allocator.alloc(u8, raw.len);
-                    mem.copy(u8, path, raw);
-                    u.path = path;
+                    u.path = raw;
                     return u;
                 }
             } else if (c == ':') {
                 if (i == 0) {
                     return error.MissingProtocolScheme;
                 }
-                var a = raw[0..i];
-                const scheme = try allocator.alloc(u8, a.len);
-                mem.copy(u8, scheme, a);
-                u.scheme = scheme;
-                var b = raw[i + 1 ..];
-                const path = try allocator.alloc(u8, b.len);
-                mem.copy(u8, path, b);
-                u.path = path;
+                u.scheme = raw[0..i];
+                u.path = raw[i + 1 ..];
                 return u;
             } else {
                 //  we have encountered an invalid character,
                 //  so there is no valid scheme
-                const path = try allocator.alloc(u8, raw.len);
-                mem.copy(u8, path, raw);
-                u.path = path;
+                u.path = raw;
                 return u;
             }
             i = i + 1;
         }
-        const path = try u.allocator.alloc(u8, raw.len);
-        mem.copy(u8, path, raw);
-        u.path = path;
+        u.path = raw;
         return u;
     }
 
@@ -321,7 +289,7 @@ pub const URL = struct {
         y: ?[]const u8,
     };
 
-    fn split(s: []const u8, c: []const u8, cutc: bool) !SplitResult {
+    fn split(s: []const u8, c: []const u8, cutc: bool) SplitResult {
         if (mem.indexOf(u8, s, c)) |i| {
             if (cutc) {
                 return SplitResult{
@@ -333,49 +301,56 @@ pub const URL = struct {
                 .x = s[0..i],
                 .y = s[i..],
             };
-        } else |_| {
-            return SplitResult{ .x = s, .y = null };
         }
+        return SplitResult{ .x = s, .y = null };
     }
 
-    fn parseInternal(a: *Allocator, raw_url: []const u8, via_request: bool) !URL {
-        var u = init(a);
-        if (raw_url == "" and via_request) {
+    pub fn parse(raw_url: []const u8) !URL {
+        const frag = split(raw_url, "#", true);
+        var u = try parseInternal(raw_url, false);
+        if (frag.y == null) {
+            return u;
+        }
+        return u;
+    }
+
+    fn parseInternal(raw_url: []const u8, via_request: bool) !URL {
+        var u: URL = undefined;
+        if (raw_url.len == 0 and via_request) {
             return error.EmptyURL;
         }
-        if (raw_url == "*") {
+        if (mem.eql(u8, raw_url, "*")) {
             u.path = "*";
             return u;
         }
-        const scheme = try u.getScheme(raw_url);
+        const scheme = try getScheme(raw_url);
         var rest: []const u8 = undefined;
         if (scheme.scheme) |s| {
-            const sc = try u.allocator.alloc(u8, s.len);
-            mem.copy(u8, sc, s);
-            u.scheme = sc;
+            u.scheme = s;
         }
         rest = scheme.path;
-        if (hasSuffix(rest, "?" and count(rest, "?") == 1)) {
+        if (hasSuffix(rest, "?") and count(rest, "?") == 1) {
             u.force_query = true;
             rest = rest[0 .. rest.len - 1];
         } else {
             const s = split(rest, "?", true);
             rest = s.x;
             //TODO: copy
-            u.raw_query = x.y;
+            u.raw_query = s.y;
         }
+        return u;
     }
 };
 
 /// hasPrefix returns true if slice s begins with prefix.
 pub fn hasPrefix(s: []const u8, prefix: []const u8) bool {
     return s.len >= prefix.len and
-        equal(s[0..prefix.len], prefix);
+        mem.eql(u8, s[0..prefix.len], prefix);
 }
 
 pub fn hasSuffix(s: []const u8, suffix: []const u8) bool {
     return s.len >= suffix.len and
-        equal(s[s.len - suffix.len ..], suffix);
+        mem.eql(u8, s[s.len - suffix.len ..], suffix);
 }
 
 // naive count
@@ -383,12 +358,11 @@ pub fn count(s: []const u8, sub: []const u8) usize {
     var x: usize = 0;
     var idx: usize = 0;
     while (idx < s.len) {
-        if (mem.index(s[idx..], sub)) |i| {
+        if (mem.indexOf(u8, s[idx..], sub)) |i| {
             x += 1;
             idx += i + sub.len;
-        } else |_| {
-            return x;
         }
+        return x;
     }
     return x;
 }

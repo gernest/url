@@ -3,7 +3,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 const debug = std.debug;
-
+const UserInfo = url.UserInfo;
+const URL = url.URL;
 const EscapeTest = struct {
     in: []const u8,
     out: []const u8,
@@ -193,22 +194,22 @@ test "PathEscape" {
 const TestURL = struct {
     scheme: ?[]const u8,
     opaque: ?[]const u8,
-    user: ?*UserInfo,
+    user: ?UserInfo,
     host: ?[]const u8,
     path: ?[]const u8,
     raw_path: ?[]const u8,
-    force_query: bool,
+    force_query: ?bool,
     raw_query: ?[]const u8,
     fragment: ?[]const u8,
 
     fn init(
         scheme: ?[]const u8,
         opaque: ?[]const u8,
-        user: ?*UserInfo,
+        user: ?UserInfo,
         host: ?[]const u8,
         path: ?[]const u8,
         raw_path: ?[]const u8,
-        force_query: bool,
+        force_query: ?bool,
         raw_query: ?[]const u8,
         fragment: ?[]const u8,
     ) TestURL {
@@ -251,4 +252,16 @@ const url_tests = []URLTest{
     URLTest.init("http://www.google.com/", TestURL.init("http", null, null, "www.google.com", "/", null, null, null, null), ""),
     // path with hex escaping
     URLTest.init("http://www.google.com/file%20one%26two", TestURL.init("http", null, null, "www.google.com", "/file one&two", "/file%20one%26two", null, null, null), ""),
+    // user
+    URLTest.init("ftp://webmaster@www.google.com/", TestURL.init("ftp", null, UserInfo.init("webmaster"), "www.google.com", "/", null, null, null, null), ""),
+    // escape sequence in username
+    URLTest.init("ftp://john%20doe@www.google.com/", TestURL.init("ftp", null, UserInfo.init("john doe"), "www.google.com", "/", null, null, null, null), "ftp://john%20doe@www.google.com/"),
+    // empty query
+    URLTest.init("http://www.google.com/?", TestURL.init("http", null, null, "www.google.com", "/", null, true, null, null), ""),
 };
+
+test "URL.parse" {
+    for (url_tests) |ts| {
+        const u = &try URL.parse(ts.in);
+    }
+}
