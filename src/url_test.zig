@@ -190,7 +190,44 @@ test "PathEscape" {
     }
 }
 
-test "URL" {
-    var u = url.URL.init(debug.global_allocator);
-    defer u.deinit();
-}
+const TestURL = struct {
+    scheme: ?[]const u8,
+    opaque: ?[]const u8,
+    user: ?*UserInfo,
+    host: ?[]const u8,
+    path: ?[]const u8,
+    raw_path: ?[]const u8,
+    force_query: bool,
+    raw_query: ?[]const u8,
+    fragment: ?[]const u8,
+
+    fn init(
+        scheme: ?[]const u8,
+        opaque: ?[]const u8,
+        user: ?*UserInfo,
+        host: ?[]const u8,
+        path: ?[]const u8,
+        raw_path: ?[]const u8,
+        force_query: bool,
+        raw_query: ?[]const u8,
+        fragment: ?[]const u8,
+    ) TestURL {
+        return TestURL{
+            .scheme = scheme,
+            .opaque = opaque,
+            .user = user,
+            .host = host,
+            .path = path,
+            .raw_path = raw_path,
+            .force_query = force_query,
+            .raw_query = raw_query,
+            .fragment = fragment,
+        };
+    }
+};
+
+const URLTest = struct {
+    in: []const u8,
+    out: TestURL,
+    round_trip: ?[]const u8,
+};
