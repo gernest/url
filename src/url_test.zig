@@ -230,4 +230,23 @@ const URLTest = struct {
     in: []const u8,
     out: TestURL,
     round_trip: ?[]const u8,
+
+    fn init(
+        in: []const u8,
+        out: TestURL,
+        round_trip: ?[]const u8,
+    ) URLTest {
+        return URLTest{
+            .in = in,
+            .out = out,
+            .round_trip = round_trip,
+        };
+    }
+};
+
+const url_tests = []URLTest{
+    // no path
+    URLTest.init("http://www.google.com", TestURL.init("http", null, null, "www.google.com", null, null, null, null, null), ""),
+    // path
+    URLTest.init("http://www.google.com/", TestURL.init("http", null, null, "www.google.com", "/", null, null, null, null), ""),
 };
