@@ -270,7 +270,7 @@ pub const URL = struct {
 
     const Scheme = struct {
         scheme: ?[]const u8,
-        path: ?[]const u8,
+        path: []const u8,
     };
 
     pub fn getScheme(a: *Allocator, raw: []const u8) !Scheme {
@@ -285,7 +285,7 @@ pub const URL = struct {
                     const path = try allocator.alloc(u8, raw.len);
                     mem.copy(u8, path, raw);
                     u.path = path;
-                    return;
+                    return u;
                 }
             } else if (c == ':') {
                 if (i == 0) {
@@ -299,13 +299,14 @@ pub const URL = struct {
                 const path = try allocator.alloc(u8, b.len);
                 mem.copy(u8, path, b);
                 u.path = path;
+                return u;
             } else {
                 //  we have encountered an invalid character,
                 //  so there is no valid scheme
                 const path = try allocator.alloc(u8, raw.len);
                 mem.copy(u8, path, raw);
                 u.path = path;
-                return;
+                return u;
             }
             i = i + 1;
         }
@@ -347,15 +348,50 @@ pub const URL = struct {
             return u;
         }
         const scheme = try u.getScheme(raw_url);
-        var rest: ?[]const u8 = null;
+        var rest: []const u8 = undefined;
         if (scheme.scheme) |s| {
             const sc = try u.allocator.alloc(u8, s.len);
             mem.copy(u8, sc, s);
             u.scheme = sc;
         }
         rest = scheme.path;
+        if (hasSuffix(rest, "?" and count(rest, "?") == 1)) {
+            u.force_query = true;
+            rest = rest[0 .. rest.len - 1];
+        } else {
+            const s = split(rest, "?", true);
+            rest = s.x;
+            //TODO: copy
+            u.raw_query = x.y;
+        }
     }
 };
+
+/// hasPrefix returns true if slice s begins with prefix.
+pub fn hasPrefix(s: []const u8, prefix: []const u8) bool {
+    return s.len >= prefix.len and
+        equal(s[0..prefix.len], prefix);
+}
+
+pub fn hasSuffix(s: []const u8, suffix: []const u8) bool {
+    return s.len >= suffix.len and
+        equal(s[s.len - suffix.len ..], suffix);
+}
+
+// naive count
+pub fn count(s: []const u8, sub: []const u8) usize {
+    var x: usize = 0;
+    var idx: usize = 0;
+    while (idx < s.len) {
+        if (mem.index(s[idx..], sub)) |i| {
+            x += 1;
+            idx += i + sub.len;
+        } else |_| {
+            return x;
+        }
+    }
+    return x;
+}
 
 pub const UserInfo = struct {
     username: ?[]const u8,
