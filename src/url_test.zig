@@ -2,6 +2,7 @@ const url = @import("./url.zig");
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
+const warn = std.debug.warn;
 const debug = std.debug;
 const UserInfo = url.UserInfo;
 const URL = url.URL;
@@ -263,5 +264,6 @@ const url_tests = []URLTest{
 test "URL.parse" {
     for (url_tests) |ts| {
         const u = &try URL.parse(ts.in);
+        warn("{}\n", u);
     }
 }

@@ -1,12 +1,4 @@
 var urltests = []URLTest{
-		// path with hex escaping
-	{"http://www.google.com/file%20one%26two",TestURL.init(scheme:  "http",Host:    "www.google.com",Path:    "/file one&two",RawPath: "/file%20one%26two",},"",},
-	// user
-	{"ftp://webmaster@www.google.com/",TestURL.init(scheme: "ftp",User:   User("webmaster"),Host:   "www.google.com",Path:   "/",},"",},
-	// escape sequence in username
-	{"ftp://john%20doe@www.google.com/",TestURL.init(scheme: "ftp",User:   User("john doe"),Host:   "www.google.com",Path:   "/",},"ftp://john%20doe@www.google.com/"},
-	// empty query
-	{"http://www.google.com/?",TestURL.init(scheme:     "http",Host:       "www.google.com",Path:       "/",ForceQuery: true,},""},
 	// query ending in question mark (Issue 14573)
 	{"http://www.google.com/?foo=bar?",TestURL.init(scheme:   "http",Host:     "www.google.com",Path:     "/",RawQuery: "foo=bar?",},""},
 	// query

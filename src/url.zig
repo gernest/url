@@ -336,8 +336,27 @@ pub const URL = struct {
         } else {
             const s = split(rest, "?", true);
             rest = s.x;
-            //TODO: copy
             u.raw_query = s.y;
+        }
+        if (!hasPrefix(rest, "/")) {
+            if (u.scheme != null) {
+                u.opaque = rest;
+                return u;
+            }
+            if (via_request) {
+                return error.InvalidURL;
+            }
+            // Avoid confusion with malformed schemes, like cache_object:foo/bar.
+            // See golang.org/issue/16822.
+            //
+            // RFC 3986, §3.3:
+            // In addition, a URI reference (Section 4.1) may be a relative-path reference,
+            // in which case the first path segment cannot contain a colon (":") character.
+            const colon = mem.indexOf(u8, rest, ":");
+            const slash = mem.indexOf(u8, rest, "/");
+            if (colon != null and colon.? >= 0 and (slash == null or colon.? < slash.?)) {
+                return error.BadURL;
+            }
         }
         return u;
     }
