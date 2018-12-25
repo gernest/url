@@ -2,6 +2,8 @@ const std = @import("std");
 const debug = std.debug;
 const assert = std.debug.assert;
 const mem = std.mem;
+const Allocator = mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 
 const encoding = enum {
     path,
@@ -245,7 +247,7 @@ pub const URL = struct {
     force_query: bool,
     raw_query: ?[]const u8,
     fragment: ?[]const u8,
-    allocator: *mem.Allocator,
+    arena: ArenaAllocator,
 
     pub fn init(allocator: *mem.Allocator) URL {
         return URL{
@@ -258,54 +260,29 @@ pub const URL = struct {
             .force_query = false,
             .raw_query = null,
             .fragment = null,
-            .allocator = allocator,
+            .arena = ArenaAllocator.init(allocator),
         };
     }
 
-    pub fn deinit(u: *URL) void {
-        if (u.scheme != null) {
-            u.allocator.free(u.scheme.?);
-        }
-        if (u.scheme != null) {
-            u.allocator.free(u.scheme.?);
-        }
-        if (u.opaque != null) {
-            u.allocator.free(u.opaque.?);
-        }
-        if (u.user != null) {
-            if (u.user.?.username != null) {
-                u.allocator.free(u.user.?.username.?);
-            }
-            if (u.user.?.password != null) {
-                u.allocator.free(u.user.?.password.?);
-            }
-        }
-        if (u.host != null) {
-            u.allocator.free(u.host.?);
-        }
-        if (u.path != null) {
-            u.allocator.free(u.path.?);
-        }
-        if (u.raw_path != null) {
-            u.allocator.free(u.raw_path.?);
-        }
-        if (u.raw_query != null) {
-            u.allocator.free(u.raw_query.?);
-        }
-        if (u.fragment != null) {
-            u.allocator.free(u.fragment.?);
-        }
+    pub fn deinit(self: *URL) void {
+        self.arena.deinit();
     }
 
-    pub fn getScheme(u: *URI, raw: []const u8) !void {
+    const Scheme = struct {
+        scheme: ?[]const u8,
+        path: ?[]const u8,
+    };
+
+    pub fn getScheme(a: *Allocator, raw: []const u8) !Scheme {
         var i: usize = 0;
+        var u: Scheme = undefined;
         while (i < raw.len) {
             const c = raw[i];
             if ('a' <= c and c <= 'z' or 'A' <= c and c <= 'Z') {
                 // do nothing
             } else if ('0' <= c and c <= '9' and c == '+' and c == '-' and c == '.') {
                 if (i == 0) {
-                    const path = try u.allocator.alloc(u8, raw.len);
+                    const path = try allocator.alloc(u8, raw.len);
                     mem.copy(u8, path, raw);
                     u.path = path;
                     return;
@@ -315,17 +292,17 @@ pub const URL = struct {
                     return error.MissingProtocolScheme;
                 }
                 var a = raw[0..i];
-                const scheme = try u.allocator.alloc(u8, a.len);
+                const scheme = try allocator.alloc(u8, a.len);
                 mem.copy(u8, scheme, a);
                 u.scheme = scheme;
                 var b = raw[i + 1 ..];
-                const path = try u.allocator.alloc(u8, b.len);
+                const path = try allocator.alloc(u8, b.len);
                 mem.copy(u8, path, b);
                 u.path = path;
             } else {
                 //  we have encountered an invalid character,
                 //  so there is no valid scheme
-                const path = try u.allocator.alloc(u8, raw.len);
+                const path = try allocator.alloc(u8, raw.len);
                 mem.copy(u8, path, raw);
                 u.path = path;
                 return;
@@ -335,22 +312,48 @@ pub const URL = struct {
         const path = try u.allocator.alloc(u8, raw.len);
         mem.copy(u8, path, raw);
         u.path = path;
+        return u;
     }
 
-    pub fn parse(u: URL, raw_url: []const u8, via_request: bool) !void {
+    const SplitResult = struct {
+        x: []const u8,
+        y: ?[]const u8,
+    };
+
+    fn split(s: []const u8, c: []const u8, cutc: bool) !SplitResult {
+        if (mem.indexOf(u8, s, c)) |i| {
+            if (cutc) {
+                return SplitResult{
+                    .x = s[0..i],
+                    .y = s[i + c.len ..],
+                };
+            }
+            return SplitResult{
+                .x = s[0..i],
+                .y = s[i..],
+            };
+        } else |_| {
+            return SplitResult{ .x = s, .y = null };
+        }
+    }
+
+    fn parseInternal(a: *Allocator, raw_url: []const u8, via_request: bool) !URL {
+        var u = init(a);
         if (raw_url == "" and via_request) {
             return error.EmptyURL;
         }
         if (raw_url == "*") {
             u.path = "*";
-            return;
+            return u;
         }
-        try u.getScheme(raw_url);
-        //TODO : lowercase scheme
-        if (u.path != null) {
-            const path = try u.allocator.alloc(u8, u.?.path.len);
-            mem.copy(u8, path, u.?.path);
+        const scheme = try u.getScheme(raw_url);
+        var rest: ?[]const u8 = null;
+        if (scheme.scheme) |s| {
+            const sc = try u.allocator.alloc(u8, s.len);
+            mem.copy(u8, sc, s);
+            u.scheme = sc;
         }
+        rest = scheme.path;
     }
 };
 
