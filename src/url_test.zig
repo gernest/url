@@ -249,4 +249,6 @@ const url_tests = []URLTest{
     URLTest.init("http://www.google.com", TestURL.init("http", null, null, "www.google.com", null, null, null, null, null), ""),
     // path
     URLTest.init("http://www.google.com/", TestURL.init("http", null, null, "www.google.com", "/", null, null, null, null), ""),
+    // path with hex escaping
+    URLTest.init("http://www.google.com/file%20one%26two", TestURL.init("http", null, null, "www.google.com", "/file one&two", "/file%20one%26two", null, null, null), ""),
 };
