@@ -1,10 +1,4 @@
 var urltests = []URLTest{
-	// query ending in question mark (Issue 14573)
-	{"http://www.google.com/?foo=bar?",TestURL.init(scheme:   "http",Host:     "www.google.com",Path:     "/",RawQuery: "foo=bar?",},""},
-	// query
-	{"http://www.google.com/?q=go+language",TestURL.init(scheme:   "http",Host:     "www.google.com",Path:     "/",RawQuery: "q=go+language",},"",},
-	// query with hex escaping: NOT parsed
-	{"http://www.google.com/?q=go%20language",TestURL.init(scheme:   "http",Host:     "www.google.com",Path:     "/",RawQuery: "q=go%20language",},""},
 	// %20 outside query
 	{"http://www.google.com/a%20b?q=c+d",TestURL.init(scheme:   "http",Host:     "www.google.com",Path:     "/a b",RawQuery: "q=c+d",},""},
 	// path without leading /, so no parsing

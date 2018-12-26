@@ -259,6 +259,12 @@ const url_tests = []URLTest{
     URLTest.init("ftp://john%20doe@www.google.com/", TestURL.init("ftp", null, UserInfo.init("john doe"), "www.google.com", "/", null, null, null, null), "ftp://john%20doe@www.google.com/"),
     // empty query
     URLTest.init("http://www.google.com/?", TestURL.init("http", null, null, "www.google.com", "/", null, true, null, null), ""),
+    // query ending in question mark (Issue 14573)
+    URLTest.init("http://www.google.com/?foo=bar?", TestURL.init("http", null, null, "www.google.com", "/", null, null, "foo=bar?", null), ""),
+    // query
+    URLTest.init("http://www.google.com/?q=go+language", TestURL.init("http", null, null, "www.google.com", "/", null, null, "q=go+language", null), ""),
+    // query with hex escaping: NOT parsed
+    URLTest.init("http://www.google.com/?q=go%20language", TestURL.init("http", null, null, "www.google.com", "/", null, null, "q=go%20language", null), ""),
 };
 
 test "URL.parse" {
@@ -267,7 +273,7 @@ test "URL.parse" {
         var a = std.heap.ArenaAllocator.init(allocator);
         errdefer a.deinit();
         const u = try URL.parse(&a.allocator, ts.in);
-        // warn("{}\n", u);
+        warn("{}\n", u);
         a.deinit();
     }
 }
