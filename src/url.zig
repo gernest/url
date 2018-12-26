@@ -538,8 +538,9 @@ pub fn count(s: []const u8, sub: []const u8) usize {
         if (mem.indexOf(u8, s[idx..], sub)) |i| {
             x += 1;
             idx += i + sub.len;
+        } else {
+            return x;
         }
-        return x;
     }
     return x;
 }
