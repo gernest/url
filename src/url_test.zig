@@ -262,8 +262,12 @@ const url_tests = []URLTest{
 };
 
 test "URL.parse" {
+    var allocator = std.debug.global_allocator;
     for (url_tests) |ts| {
-        const u = &try URL.parse(ts.in);
-        warn("{}\n", u);
+        var a = std.heap.ArenaAllocator.init(allocator);
+        errdefer a.deinit();
+        const u = try URL.parse(&a.allocator, ts.in);
+        // warn("{}\n", u);
+        a.deinit();
     }
 }

@@ -1,5 +1,6 @@
 const std = @import("std");
-const debug = std.debug;
+const Buffer = std.Buffer;
+const warn = std.debug.warn;
 const assert = std.debug.assert;
 const mem = std.mem;
 const Allocator = mem.Allocator;
@@ -240,7 +241,7 @@ fn escape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
 pub const URL = struct {
     scheme: ?[]const u8,
     opaque: ?[]const u8,
-    user: ?*UserInfo,
+    user: ?UserInfo,
     host: ?[]const u8,
     path: ?[]const u8,
     raw_path: ?[]const u8,
@@ -305,17 +306,20 @@ pub const URL = struct {
         return SplitResult{ .x = s, .y = null };
     }
 
-    pub fn parse(raw_url: []const u8) !URL {
+    pub fn parse(a: *Allocator, raw_url: []const u8) !URL {
         const frag = split(raw_url, "#", true);
-        var u = try parseInternal(raw_url, false);
+        var u = try parseInternal(a, raw_url, false);
         if (frag.y == null) {
             return u;
         }
-        // TODo: unescape fragment
+        var buf = &try Buffer.init(a, "");
+        defer buf.deinit();
+        try unescape(buf, frag.y.?, encoding.path);
+        u.fragment = buf.toOwnedSlice();
         return u;
     }
 
-    fn parseInternal(raw_url: []const u8, via_request: bool) !URL {
+    fn parseInternal(a: *Allocator, raw_url: []const u8, via_request: bool) !URL {
         var u: URL = undefined;
         if (raw_url.len == 0 and via_request) {
             return error.EmptyURL;
@@ -358,9 +362,162 @@ pub const URL = struct {
                 return error.BadURL;
             }
         }
+        if (u.scheme != null or !via_request and !hasPrefix(rest, "///") and hasPrefix(rest, "//")) {
+            const x = split(rest[2..], "/", false);
+            if (x.y) |y| {
+                rest = y;
+            } else {
+                rest = "";
+            }
+            const au = try parseAuthority(a, x.x);
+            u.user = au.user;
+            u.host = au.host;
+        }
+        if (rest.len > 0) {
+            try setPath(a, &u, rest);
+        }
         return u;
     }
+
+    const Authority = struct {
+        user: ?UserInfo,
+        host: []const u8,
+    };
+
+    fn parseAuthority(allocator: *Allocator, authority: []const u8) !Authority {
+        var buf = &try Buffer.init(allocator, "");
+        defer buf.deinit();
+        const idx = lastIndex(authority, "@");
+        var res: Authority = undefined;
+        if (idx == null) {
+            res.host = try parseHost(allocator, authority);
+        } else {
+            res.host = try parseHost(allocator, authority[idx.? + 1 ..]);
+        }
+        if (idx == null) {
+            res.user = null;
+            return res;
+        }
+
+        const user_info = authority[0..idx.?];
+        if (!validUserinfo(user_info)) {
+            return error.InvalidUserInfo;
+        }
+        if (index(user_info, ":")) |_| {
+            try unescape(buf, user_info, encoding.userPassword);
+            res.user = UserInfo.init(buf.toOwnedSlice());
+            return res;
+        }
+        const s = split(user_info, ":", true);
+        try unescape(buf, s.x, encoding.userPassword);
+        const username = buf.toOwnedSlice();
+        if (s.y) |y| {
+            try buf.resize(0);
+            try unescape(buf, y, encoding.userPassword);
+            res.user = UserInfo.initWithPassword(username, buf.toOwnedSlice());
+        } else {
+            res.user = UserInfo.init(username);
+        }
+        return res;
+    }
+
+    fn parseHost(a: *Allocator, host: []const u8) ![]const u8 {
+        var buf = &try Buffer.init(a, "");
+        defer buf.deinit();
+        if (hasPrefix(host, "[")) {
+            // Parse an IP-Literal in RFC 3986 and RFC 6874.
+            // E.g., "[fe80::1]", "[fe80::1%25en0]", "[fe80::1]:80".
+            const idx = lastIndex(host, "]");
+            if (idx == null) {
+                // TODO: use result to improve error message
+                return error.BadURL;
+            }
+            const i = idx.?;
+            const colon_port = host[i + 1 ..];
+            if (!validOptionalPort(colon_port)) {
+                return error.BadURL;
+            }
+            // RFC 6874 defines that %25 (%-encoded percent) introduces
+            // the zone identifier, and the zone identifier can use basically
+            // any %-encoding it likes. That's different from the host, which
+            // can only %-encode non-ASCII bytes.
+            // We do impose some restrictions on the zone, to avoid stupidity
+            // like newlines.
+            if (index(host[0..i], "%25")) |zone| {
+                try unescape(buf, host[0..zone], encoding.host);
+                const host_1 = buf.toOwnedSlice();
+                try unescape(buf, host[zone..i], encoding.zone);
+                const host_2 = buf.toOwnedSlice();
+                try unescape(buf, host[i..], encoding.host);
+                const host_3 = buf.toOwnedSlice();
+                var out_buf = &try Buffer.init(a, "");
+                defer out_buf.deinit();
+                try out_buf.append(host_1);
+                try out_buf.append(host_2);
+                try out_buf.append(host_3);
+                return out_buf.toOwnedSlice();
+            }
+        }
+        try unescape(buf, host, encoding.host);
+        return buf.toOwnedSlice();
+    }
+
+    fn validOptionalPort(port: []const u8) bool {
+        if (port.len == 0) {
+            return true;
+        }
+        if (port[0] != ':') {
+            return false;
+        }
+        for (port[1..]) |value| {
+            if (value < '0' or value > '9') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // validUserinfo reports whether s is a valid userinfo string per RFC 3986
+    // Section 3.2.1:
+    //     userinfo    = *( unreserved / pct-encoded / sub-delims / ":" )
+    //     unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~"
+    //     sub-delims  = "!" / "$" / "&" / "'" / "(" / ")"
+    //                   / "*" / "+" / "," / ";" / "="
+    //
+    // It doesn't validate pct-encoded. The caller does that via func unescape.
+    fn validUserinfo(s: []const u8) bool {
+        for (s) |r| {
+            if ('A' <= r and r <= 'Z') {
+                continue;
+            }
+            if ('a' <= r and r <= 'z') {
+                continue;
+            }
+            if ('0' <= r and r <= '9') {
+                continue;
+            }
+            switch (r) {
+                '-', '.', '_', ':', '~', '!', '$', '&', '\'', '(', ')', '*', '+', ',', ';', '=', '%', '@' => {},
+                else => {
+                    return false;
+                },
+            }
+        }
+        return true;
+    }
 };
+
+fn setPath(a: *Allocator, u: *URL, path: []const u8) !void {
+    var buf = &try Buffer.init(a, "");
+    defer buf.deinit();
+    try unescape(buf, path, encoding.path);
+    u.path = buf.toOwnedSlice();
+    try buf.resize(0);
+    try escape(buf, u.path.?, encoding.path);
+    if (!buf.eql(path)) {
+        u.raw_path = path;
+    }
+}
 
 /// hasPrefix returns true if slice s begins with prefix.
 pub fn hasPrefix(s: []const u8, prefix: []const u8) bool {
@@ -385,6 +542,14 @@ pub fn count(s: []const u8, sub: []const u8) usize {
         return x;
     }
     return x;
+}
+
+fn lastIndex(s: []const u8, sub: []const u8) ?usize {
+    return mem.lastIndexOf(u8, s, sub);
+}
+
+fn index(s: []const u8, sub: []const u8) ?usize {
+    return mem.indexOf(u8, s, sub);
 }
 
 pub const UserInfo = struct {
@@ -418,3 +583,42 @@ pub const UserInfo = struct {
         }
     }
 };
+
+// result returns a wrapper struct that helps improve error handling. Panicking
+// in production is bad, and adding more context to errors improves the
+// experience especially with parsing.
+fn result(comptime Value: type, ResultError: type) type {
+    return struct {
+        const Self = @This();
+        value: Result,
+        message: ?[]const u8,
+        pub const Error = ResultError;
+
+        pub fn withErr(e: Error, msg: ?[]const u8) Self {
+            return Self{
+                .value = Result{ .err = e },
+                .message = msg,
+            };
+        }
+
+        pub fn withValue(e: Error) Self {
+            return Self{
+                .value = Result{ .value = e },
+                .message = null,
+            };
+        }
+
+        pub const Result = union(enum) {
+            err: Error,
+            value: Value,
+        };
+
+        pub fn unwrap(self: Self) Error!Value {
+            return switch (self.value) {
+                Error => |err| err,
+                Value => |v| v,
+                else => unreachable,
+            };
+        }
+    };
+}
