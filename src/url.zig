@@ -403,11 +403,6 @@ pub const URL = struct {
         if (!validUserinfo(user_info)) {
             return error.InvalidUserInfo;
         }
-        if (index(user_info, ":")) |_| {
-            try unescape(buf, user_info, encoding.userPassword);
-            res.user = UserInfo.init(buf.toOwnedSlice());
-            return res;
-        }
         const s = split(user_info, ":", true);
         try unescape(buf, s.x, encoding.userPassword);
         const username = buf.toOwnedSlice();
