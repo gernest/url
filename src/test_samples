@@ -1,21 +1,4 @@
 var urltests = []URLTest{
-	// unescaped @ in username should not confuse host
-	URLTest.init("http://j@ne:password@google.com",TestURL.init(scheme: "http",User:   UserPassword("j@ne", "password"),Host:   "google.com",},"http://j%40ne:password@google.com"},
-	// unescaped @ in password should not confuse host
-	URLTest.init("http://jane:p@ssword@google.com",TestURL.init(scheme: "http",User:   UserPassword("jane", "p@ssword"),Host:   "google.com",},"http://jane:p%40ssword@google.com"},
-	URLTest.init("http://j@ne:password@google.com/p@th?q=@go",TestURL.init(scheme:   "http",User:     UserPassword("j@ne", "password"),Host:     "google.com",Path:     "/p@th",RawQuery: "q=@go",},"http://j%40ne:password@google.com/p@th?q=@go"},
-	URLTest.init("http://www.google.com/?q=go+language#foo",TestURL.init(scheme:   "http",Host:     "www.google.com",Path:     "/",RawQuery: "q=go+language",Fragment: "foo",},""},
-	URLTest.init("http://www.google.com/?q=go+language#foo%26bar",TestURL.init(scheme:   "http",Host:     "www.google.com",Path:     "/",RawQuery: "q=go+language",Fragment: "foo&bar",},"http://www.google.com/?q=go+language#foo&bar"},
-	URLTest.init("file:///home/adg/rabbits",TestURL.init(scheme: "file",Host:   "",Path:   "/home/adg/rabbits",},"file:///home/adg/rabbits"},
-	// "Windows" paths are no exception to the rule.
-	// See golang.org/issue/6027, especially comment #9.
-	URLTest.init("file:///C:/FooBar/Baz.txt",TestURL.init(scheme: "file",Host:   "",Path:   "/C:/FooBar/Baz.txt",},"file:///C:/FooBar/Baz.txt"},
-	// case-insensitive scheme
-	URLTest.init("MaIlTo:webmaster@golang.org",TestURL.init(scheme: "mailto",Opaque: "webmaster@golang.org",},"mailto:webmaster@golang.org"},
-	// Relative path
-	URLTest.init("a/b/c",TestURL.init(Path: "a/b/c",},"a/b/c"},
-	// escaped '?' in username and password
-	URLTest.init("http://%3Fam:pa%3Fsword@google.com",TestURL.init(scheme: "http",User:   UserPassword("?am", "pa?sword"),Host:   "google.com",},""},
 	// host subcomponent; IPv4 address in RFC 3986
 	URLTest.init("http://192.168.0.1/",TestURL.init(scheme: "http",Host:   "192.168.0.1",Path:   "/",},""},
 	// host and port subcomponents; IPv4 address in RFC 3986

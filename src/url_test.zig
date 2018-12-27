@@ -95,7 +95,7 @@ test "QueryUnEscape" {
     }
     for (unescapeFailingTests()) |ts| {
         if (url.queryUnEscape(buf, ts.in)) {
-            @panic("expected an error");
+            @panic("{}: expected an error");
         } else |err| {
             assert(err == ts.err.?);
         }
@@ -288,6 +288,23 @@ const url_tests = []URLTest{
     // same codepath)
     URLTest.init("///threeslashes", TestURL.init(null, null, null, null, "///threeslashes", null, null, null, null), ""),
     URLTest.init("http://user:password@google.com", TestURL.init("http", null, UserInfo.initWithPassword("user", "password"), "google.com", null, null, null, null, null), "http://user:password@google.com"),
+    // unescaped @ in username should not confuse host
+    URLTest.init("http://j@ne:password@google.com", TestURL.init("http", null, UserInfo.initWithPassword("j@ne", "password"), "google.com", null, null, null, null, null), "http://j%40ne:password@google.com"),
+    // unescaped @ in password should not confuse host
+    URLTest.init("http://jane:p@ssword@google.com", TestURL.init("http", null, UserInfo.initWithPassword("jane", "p@ssword"), "google.com", null, null, null, null, null), "http://jane:p%40ssword@google.com"),
+    URLTest.init("http://j@ne:password@google.com/p@th?q=@go", TestURL.init("http", null, UserInfo.initWithPassword("j@ne", "password"), "google.com", "/p@th", null, null, "q=@go", null), "http://j%40ne:password@google.com/p@th?q=@go"),
+    URLTest.init("http://www.google.com/?q=go+language#foo", TestURL.init("http", null, null, "www.google.com", "/", null, null, "q=go+language", "foo"), ""),
+    URLTest.init("http://www.google.com/?q=go+language#foo%26bar", TestURL.init("http", null, null, "www.google.com", "/", null, null, "q=go+language", "foo&bar"), "http://www.google.com/?q=go+language#foo&bar"),
+    URLTest.init("file:///home/adg/rabbits", TestURL.init("file", null, null, "", "/home/adg/rabbits", null, null, null, null), "file:///home/adg/rabbits"),
+    // "Windows" paths are no exception to the rule.
+    // See golang.org/issue/6027, especially comment #9.
+    URLTest.init("file:///C:/FooBar/Baz.txt", TestURL.init("file", null, null, "", "/C:/FooBar/Baz.txt", null, null, null, null), "file:///C:/FooBar/Baz.txt"),
+    // case-insensitive scheme
+    URLTest.init("MaIlTo:webmaster@golang.org", TestURL.init("mailto", "webmaster@golang.org", null, null, null, null, null, null, null), "mailto:webmaster@golang.org"),
+    // Relative path
+    URLTest.init("a/b/c", TestURL.init(null, null, null, null, "a/b/c", null, null, null, null), "a/b/c"),
+    // escaped '?' in username and password
+    // URLTest.init("http://%3Fam:pa%3Fsword@google.com", TestURL.init("http", null, UserInfo.initWithPassword("?am", "pa?sword"), "google.com", null, null, null, null, null), ""),
 };
 
 test "URL.parse" {
@@ -296,7 +313,86 @@ test "URL.parse" {
         var a = std.heap.ArenaAllocator.init(allocator);
         errdefer a.deinit();
         const u = try URL.parse(&a.allocator, ts.in);
-        warn("{}\n", u);
+        try compare(ts.in, &ts.out, &u);
         a.deinit();
+    }
+}
+
+const test_failed = error.TestFailed;
+
+fn equal(a: []const u8, b: ?[]const u8) bool {
+    if (b == null) {
+        return false;
+    }
+    return mem.eql(u8, a, b.?);
+}
+
+fn compare(uri: []const u8, a: *const TestURL, b: *const URL) !void {
+    if (a.scheme) |scheme| {
+        if (!equal(scheme, b.scheme)) {
+            warn("{}: expected scheme={} got scheme={}\n", uri, scheme, b.scheme);
+            return test_failed;
+        }
+    }
+    if (a.opaque) |opaque| {
+        if (!equal(opaque, b.opaque)) {
+            warn("{}: expected opaque={} got opaque={}\n", uri, opaque, b.opaque);
+            return test_failed;
+        }
+    }
+    if (a.user) |user| {
+        const u = b.user.?;
+        if (user.username) |username| {
+            if (!equal(username, u.username)) {
+                warn("{}: expected username={} got username={}\n", uri, username, u.username);
+                return test_failed;
+            }
+        }
+        if (user.password) |password| {
+            if (!equal(password, u.password)) {
+                warn("{}: expected password={} got password={}\n", uri, password, u.password);
+                return test_failed;
+            }
+        }
+        if (user.password_set != u.password_set) {
+            warn("{}: expected password_set={} got password_set={}\n", uri, user.password_set, u.password_set);
+            return test_failed;
+        }
+    }
+    if (a.host) |host| {
+        if (!equal(host, b.host)) {
+            warn("{}: expected host={} got host={}\n", uri, host, b.host);
+            return test_failed;
+        }
+    }
+    if (a.path) |path| {
+        if (!equal(path, b.path)) {
+            warn("{}: expected path={} got path={}\n", uri, path, b.path);
+            return test_failed;
+        }
+    }
+    if (a.raw_path) |raw_path| {
+        if (!equal(raw_path, b.raw_path)) {
+            warn("{}: expected raw_path={} got raw_path={}\n", uri, raw_path, b.raw_path);
+            return test_failed;
+        }
+    }
+    if (a.force_query) |force_query| {
+        if (force_query != b.force_query) {
+            warn("{}: expected force_query={} got force_query={}\n", uri, force_query, b.force_query);
+            return test_failed;
+        }
+    }
+    if (a.raw_query) |raw_query| {
+        if (!equal(raw_query, b.raw_query)) {
+            warn("{}: expected raw_path={} got raw_path={}\n", uri, raw_query, b.raw_query);
+            return test_failed;
+        }
+    }
+    if (a.fragment) |fragment| {
+        if (!equal(fragment, b.fragment)) {
+            warn("{}: expected fragment={} got fragment={}\n", uri, fragment, b.fragment);
+            return test_failed;
+        }
     }
 }
