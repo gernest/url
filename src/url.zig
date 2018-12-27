@@ -281,11 +281,22 @@ pub const URL = struct {
     force_query: bool,
     raw_query: ?[]const u8,
     fragment: ?[]const u8,
+    arena: ArenaAllocator,
 
     const Scheme = struct {
         scheme: ?[]const u8,
         path: []const u8,
     };
+
+    fn init(a: *Allocator) URL {
+        var u: URL = undefined;
+        u.arena = ArenaAllocator.init(a);
+        return u;
+    }
+
+    fn deinit(self: *URL) void {
+        self.arena.deinit();
+    }
 
     pub fn getScheme(raw: []const u8) !Scheme {
         var i: usize = 0;
@@ -353,7 +364,7 @@ pub const URL = struct {
     }
 
     fn parseInternal(a: *Allocator, raw_url: []const u8, via_request: bool) !URL {
-        var u: URL = undefined;
+        var u = init(a);
         if (raw_url.len == 0 and via_request) {
             return error.EmptyURL;
         }
@@ -405,12 +416,12 @@ pub const URL = struct {
             } else {
                 rest = "";
             }
-            const au = try parseAuthority(a, x.x);
+            const au = try parseAuthority(&u.arena.allocator, x.x);
             u.user = au.user;
             u.host = au.host;
         }
         if (rest.len > 0) {
-            try setPath(a, &u, rest);
+            try setPath(&u.arena.allocator, &u, rest);
         }
         return u;
     }

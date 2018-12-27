@@ -318,11 +318,9 @@ const url_tests = []URLTest{
 test "URL.parse" {
     var allocator = std.debug.global_allocator;
     for (url_tests) |ts| {
-        var a = std.heap.ArenaAllocator.init(allocator);
-        errdefer a.deinit();
-        const u = try URL.parse(&a.allocator, ts.in);
-        try compare(ts.in, &ts.out, &u);
-        a.deinit();
+        const u = &try URL.parse(allocator, ts.in);
+        try compare(ts.in, &ts.out, u);
+        u.deinit();
     }
 }
 
