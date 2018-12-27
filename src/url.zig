@@ -86,7 +86,7 @@ fn is25(s: []const u8) bool {
 
 fn unescape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
     const ctx = try countUneEscape(s, mode);
-    if (ctx.buffer_size == 0 and !ctx.has_plus) {
+    if (ctx.buffer_size == s.len and !ctx.has_plus) {
         try a.append(s);
     } else {
         try a.resize(ctx.buffer_size);
@@ -123,6 +123,7 @@ const UnescapeContext = struct {
     buffer_size: usize,
     has_plus: bool,
 };
+
 // countEscape calcutates and reurns the size of the buffer necessary for
 // storing unescaped s.
 fn countUneEscape(s: []const u8, mode: encoding) !UnescapeContext {
@@ -187,25 +188,15 @@ const EscapeContext = struct {
 };
 
 fn escape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
-    var spaceCount: usize = 0;
-    var hexCount: usize = 0;
-    for (s) |c| {
-        if (shouldEscape(c, mode)) {
-            if (c == ' ' and mode == encoding.queryComponent) {
-                spaceCount = spaceCount + 1;
-            } else {
-                hexCount = hexCount + 1;
-            }
-        }
-    }
-    if (spaceCount == 0 and hexCount == 0) {
+    const ctx = countEscape(s, mode);
+    if (ctx.space_count == 0 and ctx.hex_count == 0) {
         try a.append(s);
     } else {
-        const required = s.len + 2 * hexCount;
+        const required = s.len + 2 * ctx.hex_count;
         try a.resize(required);
         var t = a.toSlice();
         var i: usize = 0;
-        if (hexCount == 0) {
+        if (ctx.hex_count == 0) {
             while (i < s.len) {
                 if (s[i] == ' ') {
                     t[i] = '+';
@@ -236,6 +227,24 @@ fn escape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
             }
         }
     }
+}
+
+fn countEscape(s: []const u8, mode: encoding) EscapeContext {
+    var spaceCount: usize = 0;
+    var hexCount: usize = 0;
+    for (s) |c| {
+        if (shouldEscape(c, mode)) {
+            if (c == ' ' and mode == encoding.queryComponent) {
+                spaceCount = spaceCount + 1;
+            } else {
+                hexCount = hexCount + 1;
+            }
+        }
+    }
+    return EscapeContext{
+        .space_count = spaceCount,
+        .hex_count = hexCount,
+    };
 }
 
 // A URL represents a parsed URL (technically, a URI reference).
