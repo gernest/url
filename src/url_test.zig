@@ -265,6 +265,29 @@ const url_tests = []URLTest{
     URLTest.init("http://www.google.com/?q=go+language", TestURL.init("http", null, null, "www.google.com", "/", null, null, "q=go+language", null), ""),
     // query with hex escaping: NOT parsed
     URLTest.init("http://www.google.com/?q=go%20language", TestURL.init("http", null, null, "www.google.com", "/", null, null, "q=go%20language", null), ""),
+    // %20 outside query
+    URLTest.init("http://www.google.com/a%20b?q=c+d", TestURL.init("http", null, null, "www.google.com", "/a b", null, null, "q=c+d", null), ""),
+    // path without leading /, so no parsing
+    URLTest.init("http:www.google.com/?q=go+language", TestURL.init("http", "www.google.com/", null, null, null, null, null, "q=go+language", null), "http:www.google.com/?q=go+language"),
+    // path without leading /, so no parsing
+    URLTest.init("http:%2f%2fwww.google.com/?q=go+language", TestURL.init("http", "%2f%2fwww.google.com/", null, null, null, null, null, "q=go+language", null), "http:%2f%2fwww.google.com/?q=go+language"),
+    // non-authority with path
+    URLTest.init("mailto:/webmaster@golang.org", TestURL.init("mailto", null, null, null, "/webmaster@golang.org", null, null, null, null), "mailto:///webmaster@golang.org"),
+    // non-authority
+    URLTest.init("mailto:webmaster@golang.org", TestURL.init("mailto", "webmaster@golang.org", null, null, null, null, null, null, null), ""),
+    // unescaped :// in query should not create a scheme
+    URLTest.init("/foo?query=http://bad", TestURL.init(null, null, null, null, "/foo", null, null, "query=http://bad", null), ""),
+    // leading // without scheme should create an authority
+    URLTest.init("//foo", TestURL.init(null, null, null, "foo", null, null, null, null, null), ""),
+    // leading // without scheme, with userinfo, path, and query
+    URLTest.init("//user@foo/path?a=b", TestURL.init(null, null, UserInfo.init("user"), "foo", "/path", null, null, "a=b", null), ""),
+    // Three leading slashes isn't an authority, but doesn't return an error.
+    // (We can't return an error, as this code is also used via
+    // ServeHTTP -> ReadRequest -> Parse, which is arguably a
+    // different URL parsing context, but currently shares the
+    // same codepath)
+    URLTest.init("///threeslashes", TestURL.init(null, null, null, null, "///threeslashes", null, null, null, null), ""),
+    URLTest.init("http://user:password@google.com", TestURL.init("http", null, UserInfo.initWithPassword("user", "password"), "google.com", null, null, null, null, null), "http://user:password@google.com"),
 };
 
 test "URL.parse" {
