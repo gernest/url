@@ -84,13 +84,8 @@ fn is25(s: []const u8) bool {
     return mem.eql(u8, s, "%25");
 }
 
-fn unescape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
-    const ctx = try countUneEscape(s, mode);
-    if (!ctx.canUnEscape()) {
-        try a.append(s);
-    } else {
-        try a.resize(ctx.buffer_size);
-        var t = a.toSlice();
+fn unescape(t: []u8, ctx: UnescapeContext, s: []const u8, mode: encoding) void {
+    if (ctx.canUnEscape()) {
         var j: usize = 0;
         var i: usize = 0;
         while (i < s.len) {
@@ -116,6 +111,8 @@ fn unescape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
                 },
             }
         }
+    } else {
+        mem.copy(u8, t, s);
     }
 }
 
@@ -174,34 +171,45 @@ fn countUneEscape(s: []const u8, mode: encoding) !UnescapeContext {
 }
 
 pub fn queryUnescape(a: *std.Buffer, s: []const u8) !void {
-    return unescape(a, s, encoding.queryComponent);
+    const ctx = try countUneEscape(s, encoding.queryComponent);
+    try a.resize(ctx.buffer_size);
+    unescape(a.toSlice(), ctx, s, encoding.queryComponent);
 }
 
 pub fn pathUnescape(a: *std.Buffer, s: []const u8) !void {
-    return unescape(a, s, encoding.path);
+    const ctx = try countUneEscape(s, encoding.pathSegment);
+    try a.resize(ctx.buffer_size);
+    unescape(a.toSlice(), ctx, s, encoding.pathSegment);
 }
 
 pub fn pathEscape(a: *std.Buffer, s: []const u8) !void {
-    return escape(a, s, encoding.pathSegment);
+    const ctx = countEscape(s, encoding.pathSegment);
+    try a.resize(ctx.len());
+    escape(a.toSlice(), ctx, s, encoding.pathSegment);
 }
 
 pub fn queryEscape(a: *std.Buffer, s: []const u8) !void {
-    return escape(a, s, encoding.queryComponent);
+    const ctx = countEscape(s, encoding.queryComponent);
+    try a.resize(ctx.len());
+    return escape(a.toSlice(), ctx, s, encoding.queryComponent);
 }
 
 const EscapeContext = struct {
     space_count: usize,
     hex_count: usize,
+    length: usize,
+
+    fn canEscape(self: EscapeContext) bool {
+        return !(self.space_count == 0 and self.hex_count == 0);
+    }
+
+    fn len(self: EscapeContext) usize {
+        return self.length + 2 * self.hex_count;
+    }
 };
 
-fn escape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
-    const ctx = countEscape(s, mode);
-    if (ctx.space_count == 0 and ctx.hex_count == 0) {
-        try a.append(s);
-    } else {
-        const required = s.len + 2 * ctx.hex_count;
-        try a.resize(required);
-        var t = a.toSlice();
+fn escape(t: []u8, ctx: EscapeContext, s: []const u8, mode: encoding) void {
+    if (ctx.canEscape()) {
         var i: usize = 0;
         if (ctx.hex_count == 0) {
             while (i < s.len) {
@@ -233,7 +241,18 @@ fn escape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
                 i = i + 1;
             }
         }
+    } else {
+        mem.copy(u8, t, s);
     }
+}
+
+fn shouldEscapeString(s: []const u8) bool {
+    return countEscape(s).canEscape();
+}
+
+fn shouldUnEscapeString(s: []const u8) !bool {
+    const ctx = try countUneEscape(s);
+    return ctx.canUnEscape();
 }
 
 fn countEscape(s: []const u8, mode: encoding) EscapeContext {
@@ -251,6 +270,7 @@ fn countEscape(s: []const u8, mode: encoding) EscapeContext {
     return EscapeContext{
         .space_count = spaceCount,
         .hex_count = hexCount,
+        .length = s.len,
     };
 }
 
@@ -351,18 +371,26 @@ pub const URL = struct {
     }
 
     pub fn parse(a: *Allocator, raw_url: []const u8) !URL {
-        const frag = split(raw_url, "#", true);
         var uri = init(a);
         var u = &uri;
+
+        // we allocate once and copy all the url. This will allow us to be sure
+        // that the strings are available throughout the lifetime of the URL
+        // instance until URL.deinit is called.
+        // var al = &u.arena.allocator;
+        // var copy_raw = try al.alloc(u8, raw_url.len);
+        // mem.copy(u8, copy_raw, raw_url);
         errdefer u.deinit();
+        const frag = split(raw_url, "#", true);
         try parseInternal(u, frag.x, false);
         if (frag.y == null) {
             return uri;
         }
-        var buf = &try Buffer.init(a, "");
-        defer buf.deinit();
-        try unescape(buf, frag.y.?, encoding.path);
-        u.fragment = buf.toOwnedSlice();
+        const ctx = try countUneEscape(frag.y.?, encoding.path);
+        var al = &u.arena.allocator;
+        var f = try al.alloc(u8, ctx.buffer_size);
+        unescape(f, ctx, frag.y.?, encoding.path);
+        u.fragment = f;
         return uri;
     }
 
@@ -433,9 +461,13 @@ pub const URL = struct {
         host: []const u8,
     };
 
+    const hostList = struct {
+        host_1: []const u8,
+        host_2: []const u8,
+        host_3: []const u8,
+    };
+
     fn parseAuthority(allocator: *Allocator, authority: []const u8) !Authority {
-        var buf = &try Buffer.init(allocator, "");
-        defer buf.deinit();
         const idx = lastIndex(authority, "@");
         var res: Authority = undefined;
         if (idx == null) {
@@ -453,12 +485,14 @@ pub const URL = struct {
             return error.InvalidUserInfo;
         }
         const s = split(user_info, ":", true);
-        try unescape(buf, s.x, encoding.userPassword);
-        const username = buf.toOwnedSlice();
+        var ctx = try countUneEscape(s.x, encoding.userPassword);
+        var username = try allocator.alloc(u8, ctx.buffer_size);
+        unescape(username, ctx, s.x, encoding.userPassword);
         if (s.y) |y| {
-            try buf.resize(0);
-            try unescape(buf, y, encoding.userPassword);
-            res.user = UserInfo.initWithPassword(username, buf.toOwnedSlice());
+            ctx = try countUneEscape(y, encoding.userPassword);
+            var password = try allocator.alloc(u8, ctx.buffer_size);
+            unescape(password, ctx, y, encoding.userPassword);
+            res.user = UserInfo.initWithPassword(username, password);
         } else {
             res.user = UserInfo.init(username);
         }
@@ -466,8 +500,6 @@ pub const URL = struct {
     }
 
     fn parseHost(a: *Allocator, host: []const u8) ![]const u8 {
-        var buf = &try Buffer.init(a, "");
-        defer buf.deinit();
         if (hasPrefix(host, "[")) {
             // Parse an IP-Literal in RFC 3986 and RFC 6874.
             // E.g., "[fe80::1]", "[fe80::1%25en0]", "[fe80::1]:80".
@@ -488,22 +520,21 @@ pub const URL = struct {
             // We do impose some restrictions on the zone, to avoid stupidity
             // like newlines.
             if (index(host[0..i], "%25")) |zone| {
-                try unescape(buf, host[0..zone], encoding.host);
-                const host_1 = buf.toOwnedSlice();
-                try unescape(buf, host[zone..i], encoding.zone);
-                const host_2 = buf.toOwnedSlice();
-                try unescape(buf, host[i..], encoding.host);
-                const host_3 = buf.toOwnedSlice();
-                var out_buf = &try Buffer.init(a, "");
-                defer out_buf.deinit();
-                try out_buf.append(host_1);
-                try out_buf.append(host_2);
-                try out_buf.append(host_3);
-                return out_buf.toOwnedSlice();
+                const ctx_1 = try countUneEscape(host[0..zone], encoding.host);
+                const ctx_2 = try countUneEscape(host[zone..i], encoding.zone);
+                const ctx_3 = try countUneEscape(host[i..], encoding.host);
+                const required = ctx_1.buffer_size + ctx_2.buffer_size + ctx_3.buffer_size;
+                var out_buf = try a.alloc(u8, required);
+                unescape(out_buf[0..ctx_1.buffer_size], ctx_1, host[0..zone], encoding.host);
+                unescape(out_buf[ctx_1.buffer_size .. ctx_1.buffer_size + ctx_2.buffer_size], ctx_2, host[zone..i], encoding.zone);
+                unescape(out_buf[ctx_1.buffer_size + ctx_2.buffer_size .. ctx_1.buffer_size + ctx_2.buffer_size + ctx_3.buffer_size], ctx_3, host[i..], encoding.host);
+                return out_buf;
             }
         }
-        try unescape(buf, host, encoding.host);
-        return buf.toOwnedSlice();
+        const ctx = try countUneEscape(host, encoding.host);
+        var out = try a.alloc(u8, ctx.buffer_size);
+        unescape(out, ctx, host, encoding.host);
+        return out;
     }
 
     fn validOptionalPort(port: []const u8) bool {
@@ -552,14 +583,17 @@ pub const URL = struct {
 };
 
 fn setPath(a: *Allocator, u: *URL, path: []const u8) !void {
-    var buf = &try Buffer.init(a, "");
-    defer buf.deinit();
-    try unescape(buf, path, encoding.path);
-    u.path = buf.toOwnedSlice();
-    try buf.resize(0);
-    try escape(buf, u.path.?, encoding.path);
-    if (!buf.eql(path)) {
-        u.raw_path = path;
+    const uctx = try countUneEscape(path, encoding.path);
+    var raw_path = try a.alloc(u8, uctx.buffer_size);
+    unescape(raw_path, uctx, path, encoding.path);
+    u.path = raw_path;
+    const ectx = countEscape(path, encoding.path);
+    var escaped_path = try a.alloc(u8, ectx.len());
+    escape(escaped_path, ectx, u.path.?, encoding.path);
+    if (!mem.eql(u8, raw_path, escaped_path)) {
+        var e = try a.alloc(u8, path.len);
+        mem.copy(u8, e, path);
+        u.raw_path = e;
     }
 }
 
