@@ -331,6 +331,9 @@ pub const URL = struct {
         const scheme = try getScheme(raw_url);
         var rest: []const u8 = undefined;
         if (scheme.scheme) |s| {
+            // TODO: lowercase scheme
+            // I'm afraid to pull unicode package dependency here for now, but
+            // shcme must be lowercased.
             u.scheme = s;
         }
         rest = scheme.path;
