@@ -85,48 +85,14 @@ fn is25(s: []const u8) bool {
 }
 
 fn unescape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
-    var n: usize = 0;
-    var hasPlus: bool = true;
-    var tmpa: [3]u8 = undefined;
-    var tm = tmpa[0..];
-    var i: usize = 0;
-    while (i < s.len) {
-        switch (s[i]) {
-            '%' => {
-                n = n + 1;
-                if (i + 2 >= s.len or !ishex(s[i + 1]) or !ishex(s[i + 2])) {
-                    return Error.EscapeError;
-                }
-                if (mode == encoding.host and unhex(s[i + 1]) < 9 and !is25(s[i .. i + 3])) {
-                    return Error.EscapeError;
-                }
-                if (mode == encoding.zone) {
-                    const v = unhex(s[i + 1]) << 4 | unhex(s[i + 2]);
-                    if (!is25(s[i .. i + 3]) and v != ' ' and shouldEscape(v, encoding.host)) {
-                        return Error.EscapeError;
-                    }
-                }
-                i = i + 3;
-            },
-            '+' => {
-                hasPlus = mode == encoding.queryComponent;
-                i = i + 1;
-            },
-            else => {
-                if ((mode == encoding.host or mode == encoding.zone) and s[i] < 0x80 and shouldEscape(s[i], mode)) {
-                    return Error.InvalidHostError;
-                }
-                i = i + 1;
-            },
-        }
-    }
-    if (n == 0 and !hasPlus) {
+    const ctx = try countEscape(s, mode);
+    if (ctx.buffer_size == 0 and !ctx.has_plus) {
         try a.append(s);
     } else {
-        try a.resize(s.len - 2 * n);
+        try a.resize(ctx.buffer_size);
         var t = a.toSlice();
         var j: usize = 0;
-        i = 0;
+        var i: usize = 0;
         while (i < s.len) {
             switch (s[i]) {
                 '%' => {
@@ -159,11 +125,9 @@ const EscapeContext = struct {
 };
 // countEscape calcutates and reurns the size of the buffer necessary for
 // storing escaped charaters from s.
-fn countEscape(s: []const u8, mode: encoding) !usize {
+fn countEscape(s: []const u8, mode: encoding) !EscapeContext {
     var n: usize = 0;
-    var hasPlus: bool = true;
-    var tmpa: [3]u8 = undefined;
-    var tm = tmpa[0..];
+    var has_plus: bool = true;
     var i: usize = 0;
     while (i < s.len) {
         switch (s[i]) {
@@ -184,7 +148,7 @@ fn countEscape(s: []const u8, mode: encoding) !usize {
                 i = i + 3;
             },
             '+' => {
-                hasPlus = mode == encoding.queryComponent;
+                has_plus = mode == encoding.queryComponent;
                 i = i + 1;
             },
             else => {
@@ -195,10 +159,10 @@ fn countEscape(s: []const u8, mode: encoding) !usize {
             },
         }
     }
-    if (n == 0) {
-        return n;
-    }
-    return s.len - 2 * n;
+    return EscapeContext{
+        .buffer_size = s.len - 2 * n,
+        .has_plus = has_plus,
+    };
 }
 
 pub fn queryUnescape(a: *std.Buffer, s: []const u8) !void {
