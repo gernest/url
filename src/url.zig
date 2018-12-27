@@ -352,25 +352,27 @@ pub const URL = struct {
 
     pub fn parse(a: *Allocator, raw_url: []const u8) !URL {
         const frag = split(raw_url, "#", true);
-        var u = try parseInternal(a, frag.x, false);
+        var uri = init(a);
+        var u = &uri;
+        errdefer u.deinit();
+        try parseInternal(u, frag.x, false);
         if (frag.y == null) {
-            return u;
+            return uri;
         }
         var buf = &try Buffer.init(a, "");
         defer buf.deinit();
         try unescape(buf, frag.y.?, encoding.path);
         u.fragment = buf.toOwnedSlice();
-        return u;
+        return uri;
     }
 
-    fn parseInternal(a: *Allocator, raw_url: []const u8, via_request: bool) !URL {
-        var u = init(a);
+    fn parseInternal(u: *URL, raw_url: []const u8, via_request: bool) !void {
         if (raw_url.len == 0 and via_request) {
             return error.EmptyURL;
         }
         if (mem.eql(u8, raw_url, "*")) {
             u.path = "*";
-            return u;
+            return;
         }
         const scheme = try getScheme(raw_url);
         var rest: []const u8 = undefined;
@@ -392,7 +394,7 @@ pub const URL = struct {
         if (!hasPrefix(rest, "/")) {
             if (u.scheme != null) {
                 u.opaque = rest;
-                return u;
+                return;
             }
             if (via_request) {
                 return error.InvalidURL;
@@ -421,9 +423,9 @@ pub const URL = struct {
             u.host = au.host;
         }
         if (rest.len > 0) {
-            try setPath(&u.arena.allocator, &u, rest);
+            try setPath(&u.arena.allocator, u, rest);
         }
-        return u;
+        return;
     }
 
     const Authority = struct {
