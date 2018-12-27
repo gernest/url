@@ -362,7 +362,7 @@ pub const URL = struct {
                 return error.BadURL;
             }
         }
-        if ((u.scheme != null or !via_request) and !hasPrefix(rest, "///") and hasPrefix(rest, "//")) {
+        if ((u.scheme != null or !via_request and !hasPrefix(rest, "///")) and hasPrefix(rest, "//")) {
             const x = split(rest[2..], "/", false);
             if (x.y) |y| {
                 rest = y;
