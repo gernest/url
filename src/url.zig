@@ -85,7 +85,7 @@ fn is25(s: []const u8) bool {
 }
 
 fn unescape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
-    const ctx = try countEscape(s, mode);
+    const ctx = try countUneEscape(s, mode);
     if (ctx.buffer_size == 0 and !ctx.has_plus) {
         try a.append(s);
     } else {
@@ -124,8 +124,8 @@ const UnescapeContext = struct {
     has_plus: bool,
 };
 // countEscape calcutates and reurns the size of the buffer necessary for
-// storing escaped charaters from s.
-fn countEscape(s: []const u8, mode: encoding) !UnescapeContext {
+// storing unescaped s.
+fn countUneEscape(s: []const u8, mode: encoding) !UnescapeContext {
     var n: usize = 0;
     var has_plus: bool = true;
     var i: usize = 0;
@@ -180,6 +180,11 @@ pub fn pathEscape(a: *std.Buffer, s: []const u8) !void {
 pub fn queryEscape(a: *std.Buffer, s: []const u8) !void {
     return escape(a, s, encoding.queryComponent);
 }
+
+const EscapeContext = struct {
+    space_count: usize,
+    hex_count: usize,
+};
 
 fn escape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
     var spaceCount: usize = 0;
