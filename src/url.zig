@@ -308,7 +308,7 @@ pub const URL = struct {
 
     pub fn parse(a: *Allocator, raw_url: []const u8) !URL {
         const frag = split(raw_url, "#", true);
-        var u = try parseInternal(a, raw_url, false);
+        var u = try parseInternal(a, frag.x, false);
         if (frag.y == null) {
             return u;
         }
