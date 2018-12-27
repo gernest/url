@@ -86,7 +86,7 @@ fn is25(s: []const u8) bool {
 
 fn unescape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
     const ctx = try countUneEscape(s, mode);
-    if (ctx.buffer_size == s.len and !ctx.has_plus) {
+    if (!ctx.canUnEscape()) {
         try a.append(s);
     } else {
         try a.resize(ctx.buffer_size);
@@ -122,6 +122,12 @@ fn unescape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
 const UnescapeContext = struct {
     buffer_size: usize,
     has_plus: bool,
+    length: usize,
+
+    // returns true if we can unescape the string with the current unescape context.
+    fn canUnEscape(self: UnescapeContext) bool {
+        return !(self.buffer_size == self.length and !self.has_plus);
+    }
 };
 
 // countEscape calcutates and reurns the size of the buffer necessary for
@@ -163,6 +169,7 @@ fn countUneEscape(s: []const u8, mode: encoding) !UnescapeContext {
     return UnescapeContext{
         .buffer_size = s.len - 2 * n,
         .has_plus = has_plus,
+        .length = s.len,
     };
 }
 
