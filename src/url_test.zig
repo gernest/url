@@ -89,12 +89,12 @@ test "QueryUnEscape" {
     var buf = &buffer;
     defer buf.deinit();
     for (unescapePassingTests()) |ts| {
-        try url.queryUnEscape(buf, ts.in);
+        try url.queryUnescape(buf, ts.in);
         assert(buf.eql(ts.out));
         buf.shrink(0);
     }
     for (unescapeFailingTests()) |ts| {
-        if (url.queryUnEscape(buf, ts.in)) {
+        if (url.queryUnescape(buf, ts.in)) {
             @panic("{}: expected an error");
         } else |err| {
             assert(err == ts.err.?);
@@ -141,7 +141,11 @@ test "QueryEscape" {
     for (queryEscapeTests()) |ts| {
         try url.queryEscape(buf, ts.in);
         assert(buf.eql(ts.out));
-        buf.shrink(0);
+        try buf.resize(0);
+
+        try url.queryUnescape(buf, ts.out);
+        assert(buf.eql(ts.in));
+        try buf.resize(0);
     }
 }
 
@@ -188,7 +192,11 @@ test "PathEscape" {
     for (pathEscapeTests()) |ts| {
         try url.pathEscape(buf, ts.in);
         assert(buf.eql(ts.out));
-        buf.shrink(0);
+        try buf.resize(0);
+
+        try url.pathUnescape(buf, ts.out);
+        assert(buf.eql(ts.in));
+        try buf.resize(0);
     }
 }
 

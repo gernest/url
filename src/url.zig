@@ -153,12 +153,60 @@ fn unescape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
     }
 }
 
-pub fn queryUnEscape(a: *std.Buffer, s: []const u8) !void {
+const EscapeContext = struct {
+    buffer_size: usize,
+    has_plus: bool,
+};
+// countEscape calcutates and reurns the size of the buffer necessary for
+// storing escaped charaters from s.
+fn countEscape(s: []const u8, mode: encoding) !usize {
+    var n: usize = 0;
+    var hasPlus: bool = true;
+    var tmpa: [3]u8 = undefined;
+    var tm = tmpa[0..];
+    var i: usize = 0;
+    while (i < s.len) {
+        switch (s[i]) {
+            '%' => {
+                n = n + 1;
+                if (i + 2 >= s.len or !ishex(s[i + 1]) or !ishex(s[i + 2])) {
+                    return Error.EscapeError;
+                }
+                if (mode == encoding.host and unhex(s[i + 1]) < 9 and !is25(s[i .. i + 3])) {
+                    return Error.EscapeError;
+                }
+                if (mode == encoding.zone) {
+                    const v = unhex(s[i + 1]) << 4 | unhex(s[i + 2]);
+                    if (!is25(s[i .. i + 3]) and v != ' ' and shouldEscape(v, encoding.host)) {
+                        return Error.EscapeError;
+                    }
+                }
+                i = i + 3;
+            },
+            '+' => {
+                hasPlus = mode == encoding.queryComponent;
+                i = i + 1;
+            },
+            else => {
+                if ((mode == encoding.host or mode == encoding.zone) and s[i] < 0x80 and shouldEscape(s[i], mode)) {
+                    return Error.InvalidHostError;
+                }
+                i = i + 1;
+            },
+        }
+    }
+    if (n == 0) {
+        return n;
+    }
+    return s.len - 2 * n;
+}
+
+pub fn queryUnescape(a: *std.Buffer, s: []const u8) !void {
     return unescape(a, s, encoding.queryComponent);
 }
 
 pub fn pathUnescape(a: *std.Buffer, s: []const u8) !void {
-    return unescape(s, encoding.path);
+    return unescape(a, s, encoding.path);
 }
 
 pub fn pathEscape(a: *std.Buffer, s: []const u8) !void {
