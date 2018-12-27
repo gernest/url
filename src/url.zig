@@ -119,13 +119,13 @@ fn unescape(a: *std.Buffer, s: []const u8, mode: encoding) !void {
     }
 }
 
-const EscapeContext = struct {
+const UnescapeContext = struct {
     buffer_size: usize,
     has_plus: bool,
 };
 // countEscape calcutates and reurns the size of the buffer necessary for
 // storing escaped charaters from s.
-fn countEscape(s: []const u8, mode: encoding) !EscapeContext {
+fn countEscape(s: []const u8, mode: encoding) !UnescapeContext {
     var n: usize = 0;
     var has_plus: bool = true;
     var i: usize = 0;
@@ -159,7 +159,7 @@ fn countEscape(s: []const u8, mode: encoding) !EscapeContext {
             },
         }
     }
-    return EscapeContext{
+    return UnescapeContext{
         .buffer_size = s.len - 2 * n,
         .has_plus = has_plus,
     };
