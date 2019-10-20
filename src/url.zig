@@ -125,6 +125,10 @@ const UnescapeContext = struct {
     fn canUnEscape(self: UnescapeContext) bool {
         return !(self.buffer_size == self.length and !self.has_plus);
     }
+
+    fn len(self: UnescapeContext) usize {
+        return self.buffer_size;
+    }
 };
 
 // countEscape calcutates and reurns the size of the buffer necessary for
@@ -394,6 +398,70 @@ pub const URL = struct {
         return uri;
     }
 
+    pub fn encode(u: *URL, buf: *Buffer) !void {
+        try buf.resize(0);
+        if (u.scheme) |scheme| {
+            try buf.append(scheme);
+            try buf.appendByte(':');
+        }
+        if (u.opaque) |opaque| {
+            try buf.append(opaque);
+        } else {
+            if (u.scheme != null or u.host != null or u.user != null) {
+                if (u.host != null or u.path != null or u.user != null) {
+                    try buf.append("//");
+                }
+                if (u.user != null) {
+                    try u.user.?.encode(buf);
+                    try buf.appendByte('@');
+                }
+                if (u.host) |h| {
+                    const x = buf.len();
+                    const ctx = countEscape(h, encoding.host);
+                    try buf.resize(x + ctx.len());
+                    escape(buf.toSlice()[x..], ctx, h, encoding.host);
+                }
+            }
+            var pathBuf = &try Buffer.init(buf.list.allocator, "");
+            defer pathBuf.deinit();
+            try escapedPath(u, pathBuf);
+            const p = pathBuf.toSlice();
+            if (p.len > 0 and p[0] != '/' and u.host != null) {
+                try buf.appendByte('/');
+            }
+            if (buf.len() == 0) {
+                // RFC 3986 §4.2
+                // A path segment that contains a colon character (e.g., "this:that")
+                // cannot be used as the first segment of a relative-path reference, as
+                // it would be mistaken for a scheme name. Such a segment must be
+                // preceded by a dot-segment (e.g., "./this:that") to make a relative-
+                // path reference.
+                if (mem.indexOfScalar(u8, p, ':')) |idx| {
+                    const nx = mem.indexOfScalar(u8, p[0..idx], '/');
+                    if (nx == null) {
+                        try buf.append("./");
+                    }
+                }
+            }
+            if (p.len > 0) {
+                try buf.append(p);
+            }
+        }
+        if (u.force_query or u.raw_query != null) {
+            try buf.appendByte('?');
+            if (u.raw_query) |rq| {
+                try buf.append(rq);
+            }
+        }
+        if (u.fragment) |f| {
+            try buf.appendByte('#');
+            const ctx = countEscape(f, encoding.fragment);
+            const current = buf.len();
+            try buf.resize(current + ctx.len());
+            escape(buf.toSlice()[current..], ctx, f, encoding.fragment);
+        }
+    }
+
     fn parseInternal(u: *URL, raw_url: []const u8, via_request: bool) !void {
         if (raw_url.len == 0 and via_request) {
             return error.EmptyURL;
@@ -580,6 +648,68 @@ pub const URL = struct {
         }
         return true;
     }
+
+    // escapedPath writes ton buf  the escaped form of u.Path.
+    // In general there are multiple possible escaped forms of any path.
+    // EscapedPath returns u.RawPath when it is a valid escaping of u.Path.
+    // Otherwise EscapedPath ignores u.RawPath and computes an escaped
+    // form on its own.
+    // The String and RequestURI methods use EscapedPath to construct
+    // their results.
+    // In general, code should call EscapedPath instead of
+    // reading u.RawPath directly.
+    fn escapedPath(u: *URL, buf: *Buffer) !void {
+        if (u.raw_path) |raw| {
+            if (validEncodedPath(raw)) {
+                if (countUneEscape(raw, encoding.path)) |ctx| {
+                    try buf.resize(ctx.len());
+                    unescape(buf.toSlice(), ctx, raw, encoding.path);
+                    if (u.path) |p| {
+                        if (buf.eql(p)) {
+                            try buf.resize(0);
+                            try buf.append(raw);
+                            return;
+                        }
+                    }
+                } else |_| {}
+            }
+        }
+        if (u.path) |p| {
+            if (mem.eql(u8, p, "*")) {
+                return buf.append("*");
+            }
+            const ctx = countEscape(p, encoding.path);
+            try buf.resize(ctx.len());
+            escape(buf.toSlice(), ctx, p, encoding.path);
+        }
+    }
+
+    // validEncodedPath reports whether s is a valid encoded path.
+    // It must not contain any bytes that require escaping during path encoding.
+    fn validEncodedPath(s: []const u8) bool {
+        for (s) |c| {
+            // RFC 3986, Appendix A.
+            // pchar = unreserved / pct-encoded / sub-delims / ":" / "@".
+            // shouldEscape is not quite compliant with the RFC,
+            // so we check the sub-delims ourselves and let
+            // shouldEscape handle the others.
+            switch (c) {
+                '!', '$', '&', '\'', '(', ')', '*', '+', ',', ';', '=', ':', '@' => {},
+                '[', ']' => {
+                    // ok - not specified in RFC 3986 but left alone by modern browsers
+                },
+                '%' => {
+                    // ok - percent encoded, will decode
+                },
+                else => {
+                    if (shouldEscape(c, encoding.path)) {
+                        return false;
+                    }
+                },
+            }
+        }
+        return true;
+    }
 };
 
 fn setPath(a: *Allocator, u: *URL, path: []const u8) !void {
@@ -634,13 +764,11 @@ fn index(s: []const u8, sub: []const u8) ?usize {
 pub const UserInfo = struct {
     username: ?[]const u8,
     password: ?[]const u8,
-    password_set: bool,
 
     pub fn init(name: []const u8) UserInfo {
         return UserInfo{
             .username = name,
             .password = null,
-            .password_set = false,
         };
     }
 
@@ -648,17 +776,22 @@ pub const UserInfo = struct {
         return UserInfo{
             .username = name,
             .password = password,
-            .password_set = true,
         };
     }
 
     pub fn encode(u: *UserInfo, buf: *std.Buffer) !void {
-        if (u.username != null) {
-            try escape(buf, u.username.?, encoding.userPassword);
+        if (u.username) |usr| {
+            const ctx = countEscape(usr, encoding.userPassword);
+            const x = buf.len();
+            try buf.resize(x + ctx.len());
+            escape(buf.toSlice()[x..], ctx, usr, encoding.userPassword);
         }
-        if (u.password_set) {
+        if (u.password) |pass| {
             try buf.appendByte(':');
-            try escape(buf, u.username.?, encoding.userPassword);
+            const ctx = countEscape(pass, encoding.userPassword);
+            const x = buf.len();
+            try buf.resize(x + ctx.len());
+            escape(buf.toSlice()[x..], ctx, pass, encoding.userPassword);
         }
     }
 };
