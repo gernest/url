@@ -307,9 +307,9 @@ test "URL.parse" {
     var buf = &try Buffer.init(allocator, "");
     defer buf.deinit();
     for (url_tests) |ts, i| {
-        const u = &try URL.parse(allocator, ts.in);
-        try compare(ts.in, &ts.out, u);
-        try u.encode(buf);
+        var u = &try url.parse(allocator, ts.in);
+        try compare(ts.in, &ts.out, &u.url);
+        try u.url.encode(buf);
         if (ts.round_trip) |expect| {
             testing.expectEqualSlices(u8, expect, buf.toSlice());
         } else {

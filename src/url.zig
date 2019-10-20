@@ -296,31 +296,20 @@ fn countEscape(s: []const u8, mode: encoding) EscapeContext {
 // and URL's String method uses RawPath if it is a valid encoding of Path,
 // by calling the EscapedPath method.
 pub const URL = struct {
-    scheme: ?[]const u8,
-    opaque: ?[]const u8,
-    user: ?UserInfo,
-    host: ?[]const u8,
-    path: ?[]const u8,
-    raw_path: ?[]const u8,
-    force_query: bool,
-    raw_query: ?[]const u8,
-    fragment: ?[]const u8,
-    arena: ArenaAllocator,
+    scheme: ?[]const u8 = null,
+    opaque: ?[]const u8 = null,
+    user: ?UserInfo = null,
+    host: ?[]const u8 = null,
+    path: ?[]const u8 = null,
+    raw_path: ?[]const u8 = null,
+    force_query: bool = false,
+    raw_query: ?[]const u8 = null,
+    fragment: ?[]const u8 = null,
 
     const Scheme = struct {
         scheme: ?[]const u8,
         path: []const u8,
     };
-
-    fn init(a: *Allocator) URL {
-        var u: URL = undefined;
-        u.arena = ArenaAllocator.init(a);
-        return u;
-    }
-
-    fn deinit(self: *URL) void {
-        self.arena.deinit();
-    }
 
     pub fn getScheme(raw: []const u8) !Scheme {
         var i: usize = 0;
@@ -374,28 +363,16 @@ pub const URL = struct {
         return SplitResult{ .x = s, .y = null };
     }
 
-    pub fn parse(a: *Allocator, raw_url: []const u8) !URL {
-        var uri = init(a);
-        var u = &uri;
-
-        // we allocate once and copy all the url. This will allow us to be sure
-        // that the strings are available throughout the lifetime of the URL
-        // instance until URL.deinit is called.
-        // var al = &u.arena.allocator;
-        // var copy_raw = try al.alloc(u8, raw_url.len);
-        // mem.copy(u8, copy_raw, raw_url);
-        errdefer u.deinit();
+    pub fn parse(uri: *URL, a: *Allocator, raw_url: []const u8) !void {
         const frag = split(raw_url, "#", true);
-        try parseInternal(u, frag.x, false);
+        try parseInternal(uri, a, frag.x, false);
         if (frag.y == null) {
-            return uri;
+            return;
         }
         const ctx = try countUneEscape(frag.y.?, encoding.path);
-        var al = &u.arena.allocator;
-        var f = try al.alloc(u8, ctx.buffer_size);
+        var f = try a.alloc(u8, ctx.buffer_size);
         unescape(f, ctx, frag.y.?, encoding.path);
-        u.fragment = f;
-        return uri;
+        uri.fragment = f;
     }
 
     pub fn encode(u: *URL, buf: *Buffer) !void {
@@ -462,7 +439,7 @@ pub const URL = struct {
         }
     }
 
-    fn parseInternal(u: *URL, raw_url: []const u8, via_request: bool) !void {
+    fn parseInternal(u: *URL, a: *mem.Allocator, raw_url: []const u8, via_request: bool) !void {
         if (raw_url.len == 0 and via_request) {
             return error.EmptyURL;
         }
@@ -514,12 +491,12 @@ pub const URL = struct {
             } else {
                 rest = "";
             }
-            const au = try parseAuthority(&u.arena.allocator, x.x);
+            const au = try parseAuthority(a, x.x);
             u.user = au.user;
             u.host = au.host;
         }
         if (rest.len > 0) {
-            try setPath(&u.arena.allocator, u, rest);
+            try setPath(u, a, rest);
         }
         return;
     }
@@ -712,7 +689,7 @@ pub const URL = struct {
     }
 };
 
-fn setPath(a: *Allocator, u: *URL, path: []const u8) !void {
+fn setPath(u: *URL, a: *Allocator, path: []const u8) !void {
     const uctx = try countUneEscape(path, encoding.path);
     var raw_path = try a.alloc(u8, uctx.buffer_size);
     unescape(raw_path, uctx, path, encoding.path);
@@ -833,4 +810,44 @@ fn result(comptime Value: type, ResultError: type) type {
             };
         }
     };
+}
+
+// U exposes api for parsing url. The current implementation for parsing
+// involves memory allocation. This ensures that all memory allocated for url
+// parsing is freed properly.
+pub const U = struct {
+    // The parsed url object. This will have all fields set to null by default
+    // which will mean that we haven't parsed any url witht he current U
+    // instance.
+    url: URL,
+    // we don't free memory while parsing, instead we free all of it at once
+    // after we are done using the url object.
+    arena: ArenaAllocator,
+
+    fn init(a: *Allocator) U {
+        return U{
+            .url = URL{},
+            .arena = ArenaAllocator.init(a),
+        };
+    }
+
+    fn parse(self: *U, raw_url: []const u8) !void {
+        var a = &self.arena.allocator;
+        self.url = URL{};
+        try self.url.parse(a, raw_url);
+    }
+
+    fn deinit(self: *U) void {
+        self.arena.deinit();
+    }
+};
+
+/// parse parses raw_url using rfc 3986 standard, returning U with the parsed url
+/// object acceible in U.url.
+///
+/// Call u.deinit() when you no longer use the url to free memory.
+pub fn parse(a: *Allocator, raw_url: []const u8) !U {
+    var u = U.init(a);
+    try u.parse(raw_url);
+    return u;
 }
